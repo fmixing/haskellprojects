@@ -1,20 +1,17 @@
 {-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE DeriveLift            #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE InstanceSigs          #-}
-{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE QuasiQuotes           #-}
 {-# LANGUAGE Rank2Types            #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
-{-# LANGUAGE TemplateHaskell       #-}
-{-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeSynonymInstances  #-}
 {-# LANGUAGE UndecidableInstances  #-}
 {-# LANGUAGE Unsafe                #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE PolyKinds             #-}
+{-# LANGUAGE TypeOperators         #-}
 
 
 
@@ -31,6 +28,7 @@ module Lib
         , safeTailSafeList
         ) where
 
+-- 1
 
 data NotSafe
 data Safe
@@ -60,10 +58,6 @@ toSafe (Cons h t) = (Cons h t :: MarkedList a Safe)
 extractTail :: MarkedList a Safe -> MarkedList a NotSafe
 extractTail (Cons _ t) = toUnsafe t
 
-createSafe :: MarkedList a Safe
-createSafe = Cons undefined Nil
-
-
 safeTail :: MarkedList a Safe -> a
 safeTail (Cons el Nil) = el
 safeTail (Cons _ list@Cons{}) = safeTail $ toSafe list
@@ -86,3 +80,35 @@ safeHeadSafeList (ConsSafeList x _) = x
 safeTailSafeList :: SafeList a NonEmpty -> a
 safeTailSafeList (ConsSafeList x NilSafeList) = x
 safeTailSafeList (ConsSafeList _ l@ConsSafeList{}) = safeTailSafeList l
+
+-- 2
+
+createSafe :: MarkedList a Safe
+createSafe = Cons undefined Nil
+
+
+----Type Families
+
+-- 4
+
+type family And (a :: Bool) (b :: Bool) :: Bool where
+    And 'True 'True = 'True
+    And _ _ = 'False
+
+type family Or (a :: Bool) (b :: Bool) :: Bool where
+    Or 'False 'False = 'False
+    Or _ _ = 'True
+
+type family Not (a :: Bool) :: Bool where
+    Not 'True = 'False
+    Not _ = 'True
+
+type family Implies (a :: Bool) (b :: Bool) :: Bool where -- используя другие type families, без паттерн-мэтчинга
+    Implies a b = Not a `Or` b
+    
+type family If (a :: Bool) (ifTrue :: k) (ifFalse :: k) :: k where
+    If 'True then' _ = then'
+    If 'False _ else' = else'
+
+-- :kind! If 'False 1 2 -> 2
+
