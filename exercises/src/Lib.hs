@@ -12,6 +12,7 @@
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE PolyKinds             #-}
 {-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE TypeInType            #-}
 
 
 
@@ -22,19 +23,29 @@ module Lib
         , silly
         , toUnsafe
         , extractTail
+        , createSafe
         , MarkedList (..)
         , SafeList (..)
         , safeHeadSafeList
         , safeTailSafeList
+        , Door (..)
+        , open
+        , close
+        , toggle
+        , tryOpen
+        , toggleDoors
+        , toggleDoors'
         ) where
+
+import Data.Kind 
+
 
 -- 1
 
-data NotSafe
-data Safe
+data SafeType = NotSafe | Safe
 
-data MarkedList ::  * -> * -> * where
-    Nil :: MarkedList a NotSafe
+data MarkedList ::  * -> SafeType -> * where
+    Nil :: MarkedList a 'NotSafe
     Cons :: a -> MarkedList a b -> MarkedList a с
 
 instance Show a => Show (MarkedList a b) where
@@ -42,27 +53,26 @@ instance Show a => Show (MarkedList a b) where
     show (Cons h t) = "Cons " ++ show h ++ " (" ++ show t ++ ")"
 
 
-safeHead :: MarkedList a Safe -> a
+safeHead :: MarkedList a 'Safe -> a
 safeHead (Cons h _) = h
 
 
-toUnsafe :: forall a . (forall s . MarkedList a s -> MarkedList a NotSafe)
+toUnsafe :: forall a s . MarkedList a s -> MarkedList a 'NotSafe
 toUnsafe Nil = Nil
-toUnsafe (Cons h t) = ((Cons h t) :: MarkedList a NotSafe)
+toUnsafe (Cons h t) = ((Cons h t) :: MarkedList a 'NotSafe)
 
-toSafe :: forall a . (forall s . MarkedList a s -> MarkedList a Safe)
-toSafe Nil = createSafe
-toSafe (Cons h t) = (Cons h t :: MarkedList a Safe)
+cons :: a -> MarkedList a s -> MarkedList a 'Safe
+cons = Cons
 
 
-extractTail :: MarkedList a Safe -> MarkedList a NotSafe
+extractTail :: MarkedList a 'Safe -> MarkedList a 'NotSafe
 extractTail (Cons _ t) = toUnsafe t
 
-safeTail :: MarkedList a Safe -> a
+safeTail :: MarkedList a 'Safe -> a
 safeTail (Cons el Nil) = el
-safeTail (Cons _ list@Cons{}) = safeTail $ toSafe list
+safeTail (Cons _ (Cons h t)) = safeTail $ cons h t
 
-silly :: Bool -> MarkedList () NotSafe
+silly :: Bool -> MarkedList () 'NotSafe
 silly False =  Nil
 silly True =  Cons () Nil
 
@@ -83,9 +93,8 @@ safeTailSafeList (ConsSafeList _ l@ConsSafeList{}) = safeTailSafeList l
 
 -- 2
 
-createSafe :: MarkedList a Safe
-createSafe = Cons undefined Nil
-
+createSafe :: a -> MarkedList a 'Safe
+createSafe h = Cons h Nil
 
 ----Type Families
 
@@ -112,3 +121,40 @@ type family If (a :: Bool) (ifTrue :: k) (ifFalse :: k) :: k where
 
 -- :kind! If 'False 1 2 -> 2
 
+-- 5
+
+data Status = Open | Closed
+
+data Door (status :: Status) where
+    OpenDoor :: Door 'Open
+    ClosedDoor :: Door 'Closed
+
+open :: Door 'Closed -> Door 'Open
+open _ = OpenDoor
+
+close :: Door 'Open -> Door 'Closed
+close _ = ClosedDoor
+
+tryOpen :: Door a -> Door 'Open
+tryOpen _ = OpenDoor
+
+
+type family Toggle (s :: Status) where 
+    Toggle 'Open = 'Closed
+    Toggle 'Closed = 'Open
+
+toggle :: Door a -> Door (Toggle a)
+toggle OpenDoor = ClosedDoor
+toggle ClosedDoor = OpenDoor
+
+-- Есть ли какая-нибудь возможность написать функцию типа такой?
+-- Тогда у toggleDoors можно сократить тип было бы до Door a -> Door (Toggle a) -> (Door (Toggle a), Door a)
+-- toggle' :: Door (Toggle a) -> Door a
+-- toggle' OpenDoor = ClosedDoor
+-- toggle' ClosedDoor = OpenDoor
+
+toggleDoors :: Door a -> Door (Toggle a) -> (Door (Toggle a), Door (Toggle (Toggle a)))
+toggleDoors d1 d2 = (toggle d1, toggle d2)
+
+toggleDoors' :: Door a -> Door (Toggle a) -> (Door (Toggle a), Door a)
+toggleDoors' d1 d2 = (d2, d1)
