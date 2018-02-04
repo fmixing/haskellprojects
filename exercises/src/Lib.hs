@@ -35,10 +35,14 @@ module Lib
         , tryOpen
         , toggleDoors
         , toggleDoors'
+        , openWithCondition
+        , Sort
+        , Sort'
         ) where
 
+-- а как импортнуть (*) явно?
 import Data.Kind 
-
+import GHC.TypeLits (Symbol, CmpSymbol)
 
 -- 1
 
@@ -158,3 +162,66 @@ toggleDoors d1 d2 = (toggle d1, toggle d2)
 
 toggleDoors' :: Door a -> Door (Toggle a) -> (Door (Toggle a), Door a)
 toggleDoors' d1 d2 = (d2, d1)
+
+data TBool (p :: Bool) where
+    TTrue :: TBool 'True
+    TFalse :: TBool 'False
+
+type family OpenWithCondition (b :: Bool) (s :: Status) where 
+    OpenWithCondition 'False 'Closed = 'Closed    
+    OpenWithCondition _ _ = 'Open
+
+--Не совсем поняла, что делать в таком случае: мне пришлось явно паттерн-матчиться, потому что если проверить
+--только первое условие, а в остальных остаить _ _, компилятор вроде не может применить OpenWithCondition.
+--Есть ли какой-нибудь способ не делать этого?
+openWithCondition :: forall s p . Door s -> TBool p -> Door (OpenWithCondition p s)
+openWithCondition ClosedDoor TFalse = ClosedDoor
+openWithCondition ClosedDoor TTrue = OpenDoor
+openWithCondition OpenDoor TTrue = OpenDoor
+openWithCondition OpenDoor TFalse = OpenDoor
+
+
+-- 6
+
+type family Less (o :: Ordering) :: Bool where
+    Less 'LT = 'True
+    Less _ = 'False
+
+
+type family (++) (as :: [k]) (bs :: [k]) :: [k] where
+  (++) a '[] = a
+  (++) '[] b = b
+  (++) (a ': as) bs = a ': (as ++ bs)
+
+
+--Есть ли возможность написать что-то типа let?
+type family Sort (xs :: [Symbol]) :: [Symbol] where 
+    Sort ('[]) = '[]
+    Sort (x ': '[]) = '[x]
+    Sort (x : xs) = Sort (Fst (Split x xs)) ++ (x ': Sort (Snd (Split x xs)))
+
+type family Split (x :: Symbol) (xs :: [Symbol]) :: ([Symbol], [Symbol]) where
+    Split x ('[]) = '( '[], '[])
+    Split x (y : ys) = If (Less (CmpSymbol y x)) 
+        '(y : (Fst (Split x ys)), (Snd (Split x ys))) '((Fst (Split x ys)), y : (Snd (Split x ys)))
+
+type family Fst (pair :: ([Symbol], [Symbol])) :: [Symbol] where
+    Fst '(xs, ys) = xs
+
+type family Snd (pair :: ([Symbol], [Symbol])) :: [Symbol] where
+    Snd '(xs, ys) = ys
+
+
+
+type family Sort' (xs :: [Symbol]) :: [Symbol] where 
+    Sort' ('[]) = '[]
+    Sort' (x ': '[]) = '[x]
+    Sort' (x : xs) = Sort (LessElems x xs) ++ (x ': Sort (GreaterOrEqElems x xs))
+
+type family LessElems (x :: Symbol) (xs :: [Symbol]) :: [Symbol] where
+    LessElems x '[] = '[]
+    LessElems x (y : ys) = If (Less (CmpSymbol y x)) (y : LessElems x ys) (LessElems x ys)
+
+type family GreaterOrEqElems (x :: Symbol) (xs :: [Symbol]) :: [Symbol] where
+    GreaterOrEqElems x '[] = '[]    
+    GreaterOrEqElems x (y : ys) = If (Less (CmpSymbol y x)) (GreaterOrEqElems x ys) (y : GreaterOrEqElems x ys)
