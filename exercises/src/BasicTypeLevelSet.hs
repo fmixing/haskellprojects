@@ -18,4 +18,8 @@ type family Lookup (x :: k) (xs :: [k]) :: Bool where
 
 type family Delete (x :: k) (xs :: [k]) :: [k] where 
     Delete x '[] = '[]
-    Delete x (y : xs) = If (x == y) xs (y ': (Delete x xs))
+    Delete x (y : xs) = If (x == y) (Delete x xs) (y ': (Delete x xs))
+
+
+type family Insert' (x :: k) (xs :: [k]) :: [k] where 
+    Insert' x xs = If (Lookup x xs) xs (x ': xs)
