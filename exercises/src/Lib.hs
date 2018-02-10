@@ -38,6 +38,8 @@ module Lib
         , openWithCondition
         , Sort
         , Sort'
+        , If
+        , (++)
         ) where
 
 -- а как импортнуть (*) явно?
