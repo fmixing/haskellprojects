@@ -1,1 +1,7 @@
-resolver: lts-10.4
+# resolver: lts-10.4
+resolver: lts-9.14 #для uom-plugin
+
+extra-deps: #для uom-plugin
+- uom-plugin-0.2.0.1
+- template-haskell-2.11.1.0
+- inspection-testing-0.2
