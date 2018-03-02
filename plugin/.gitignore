@@ -1,0 +1,4 @@
+.stack-work/
+plugin.cabal
+*~
+.gitignore
