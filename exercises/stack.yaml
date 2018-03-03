@@ -1,1 +1,4 @@
 resolver: lts-10.4
+
+extra-deps:
+- o-clock-0.1.0
