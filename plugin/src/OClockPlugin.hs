@@ -119,9 +119,10 @@ solveDivRat defs givens deriveds wanteds = do -- needed wanteds are of the CDict
             if not $ null lefts 
                 then return $ (TcPluginContradiction lefts)
                 else do 
-                    let resolved = concat $ fmap fst rights
-                    let newWanteds = concat $ fmap snd rights
-                    return $ TcPluginOk resolved newWanteds
+                    let resolved = concatMap fst rights
+                    let newWanteds = concatMap snd rights
+                    if null resolved then return $ TcPluginOk [] [] else return $ TcPluginOk resolved newWanteds
+                    
 
 constraintToEvTerm :: RatDefs -> [Ct] -> KrConstraint -> Either Ct ([(EvTerm, Ct)], [Ct])
 constraintToEvTerm defs givensStart krConstraint = do
@@ -148,7 +149,7 @@ checkIsElem name [] = False
 checkIsElem name (krConstraint : krConstraints) = do
     let (ct, cls, ty) = krConstraint
     case ty of
-        (TyVarTy var) -> if getNameUniqueId name == getNameUniqueId (varName var) then True else False
+        (TyVarTy var) -> getNameUniqueId name == getNameUniqueId (varName var)
         _ -> checkIsElem name krConstraints
 
 getNameUniqueId :: Name -> Int
@@ -167,42 +168,42 @@ getNameUniqueId name = getKey $ nameUnique name
 -- type PredType = Type
 
 -- ty (DivRat a b) has TyConApp constructor
-getKnownRatConstraint :: RatDefs -> Ct -> Maybe KrConstraint
-getKnownRatConstraint defs ct =
-    case classifyPredType $ ctEvPred $ ctEvidence ct of
-        ClassPred cls [ty]
-            |  className cls == (getName $ knownRatTyCon defs) -- KnownRat bc we need to check if KnownRat (Div a b) 
-               -> Just (ct, cls, ty)
-        _ -> Nothing
+-- getKnownRatConstraint :: RatDefs -> Ct -> Maybe KrConstraint
+-- getKnownRatConstraint defs ct =
+--     case classifyPredType $ ctEvPred $ ctEvidence ct of
+--         ClassPred cls [ty]
+--             |  className cls == (getName $ knownRatTyCon defs) -- KnownRat bc we need to check if KnownRat (Div a b) 
+--                -> Just (ct, cls, ty)
+--         _ -> Nothing
 
 type KrConstraint = ( Ct    -- The constraint
                     , Class -- KnownRat class
                     , Type  -- The argument to KnownRat
                     )
 
--- -- Debug fuction
--- getKnownRatConstraint :: RatDefs -> Ct -> Maybe KrConstraint
--- getKnownRatConstraint defs ct =
---     case classifyPredType $ ctEvPred $ ctEvidence ct of
---         ClassPred cls xs -> case trace ((show (fmap (\x -> show $ typeOf x) xs)) ++ "!!" ++ (show (fmap (\x -> showSDocUnsafe $ ppr x) xs)) ++ "!!" ++ (show (fmap (\x -> showSDocUnsafe $ debugPprType x) xs))) xs of
---                                 [] -> Nothing
---                                 [ty] -> case ty of -- FalseTrueTrue for var means that the data constructor is TcTyVar, Used only during type inference
---                                     (TyVarTy var) -> func ty cls ct defs ("TyVarTy " ++ (show $ isId var) ++ (show $ isTyVar var) ++ (show $ isTcTyVar var) ++ " "  ++ (showSDocUnsafe $ pprTcTyVarDetails $ tcTyVarDetails var) ++ " &&"  ++ (showSDocUnsafe $ ppr $ ctEvPred $ ctEvidence ct) ++ " %%" ++ (showSDocUnsafe $ ppr $ ctEvTerm $ ctEvidence ct) ++ " " ++ (showSDocUnsafe $ ppr var) ++ " ")
---                                     AppTy{} -> func ty cls ct defs "AppTy "
---                                     ForAllTy{} -> func ty cls ct defs "ForAllTy "
---                                     FunTy{} -> func ty cls ct defs "FunTy "
---                                     LitTy{} -> func ty cls ct defs "LitTy "
---                                     CastTy{} -> func ty cls ct defs "CastTy "
---                                     CoercionTy{} -> func ty cls ct defs "CoercionTy "
---                                     (TyConApp tyCon kot) -> func ty cls ct defs ("TyConApp " ++ (showSDocUnsafe $ ppr tyCon) ++ " " ++ (showSDocUnsafe $ ppr kot) ++ " " ++ (show $ fmap (\x -> func' x) kot))
---                                 _ -> Nothing
---         _ -> Nothing
--- -- Debug fuction
--- func :: Type -> Class -> Ct -> RatDefs -> String -> Maybe KrConstraint
--- func ty cls ct defs s = 
---     if className cls == (trace (s ++ (showSDocUnsafe $ ppr (getName $ knownRatTyCon defs))) (getName $ knownRatTyCon defs))
---     then Just (ct, cls, ty)
---     else Nothing
+-- Debug fuction
+getKnownRatConstraint :: RatDefs -> Ct -> Maybe KrConstraint
+getKnownRatConstraint defs ct =
+    case classifyPredType $ ctEvPred $ ctEvidence ct of
+        ClassPred cls xs -> case trace ((show (fmap (\x -> show $ typeOf x) xs)) ++ "!!" ++ (show (fmap (\x -> showSDocUnsafe $ ppr x) xs)) ++ "!!" ++ (show (fmap (\x -> showSDocUnsafe $ debugPprType x) xs))) xs of
+                                [] -> Nothing
+                                [ty] -> case ty of -- FalseTrueTrue for var means that the data constructor is TcTyVar, Used only during type inference
+                                    (TyVarTy var) -> func ty cls ct defs ("TyVarTy " ++ (show $ isId var) ++ (show $ isTyVar var) ++ (show $ isTcTyVar var) ++ " "  ++ (showSDocUnsafe $ pprTcTyVarDetails $ tcTyVarDetails var) ++ " &&"  ++ (showSDocUnsafe $ ppr $ ctEvPred $ ctEvidence ct) ++ " %%" ++ (showSDocUnsafe $ ppr $ ctEvTerm $ ctEvidence ct) ++ " " ++ (showSDocUnsafe $ ppr var) ++ " ")
+                                    AppTy{} -> func ty cls ct defs "AppTy "
+                                    ForAllTy{} -> func ty cls ct defs "ForAllTy "
+                                    FunTy{} -> func ty cls ct defs "FunTy "
+                                    LitTy{} -> func ty cls ct defs "LitTy "
+                                    CastTy{} -> func ty cls ct defs "CastTy "
+                                    CoercionTy{} -> func ty cls ct defs "CoercionTy "
+                                    (TyConApp tyCon kot) -> func ty cls ct defs ("TyConApp " ++ (showSDocUnsafe $ ppr tyCon) ++ " " ++ (showSDocUnsafe $ ppr kot) ++ " " ++ (show $ fmap (\x -> func' x) kot))
+                                _ -> Nothing
+        _ -> Nothing
+-- Debug fuction
+func :: Type -> Class -> Ct -> RatDefs -> String -> Maybe KrConstraint
+func ty cls ct defs s = 
+    if className cls == (trace (s ++ (showSDocUnsafe $ ppr (getName $ knownRatTyCon defs))) (getName $ knownRatTyCon defs))
+    then Just (ct, cls, ty)
+    else Nothing
 
 func' :: Type -> String
 func' (TyVarTy var) = "TyVarTy " ++ (show $ isId var) ++ (show $ isTyVar var) ++ (show $ isTcTyVar var) ++ " "  ++ (showSDocUnsafe $ pprTcTyVarDetails $ tcTyVarDetails var) ++ " " ++ (showSDocUnsafe $ ppr var) ++ " "
