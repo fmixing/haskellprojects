@@ -291,4 +291,4 @@ class KnownDivRat (a :: Rat) (c :: Rat) where
     div :: RatioNat
 
 instance forall (a :: Rat) (b :: Rat) . (KnownRat a, KnownRat b) => KnownDivRat a b where
-    div = ((numerator $ ratVal @a) * (numerator $ ratVal @b)) :% ((denominator $ ratVal @a) * (denominator $ ratVal @b))
+    div = ((numerator $ ratVal @a) * (denominator $ ratVal @b)) :% ((denominator $ ratVal @a) * (numerator $ ratVal @b))

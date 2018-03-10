@@ -19,4 +19,4 @@ test = ratVal @(DivRat a b)
 
 
 main :: IO ()
-main = print $ test @(DivRat (9 % 11) (9 % 11))
+main = print $ test @(5 / 1) @(7 / 1)
