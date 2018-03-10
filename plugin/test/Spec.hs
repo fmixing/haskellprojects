@@ -14,9 +14,9 @@ import Data.Proxy (Proxy(Proxy))
 -- test :: (KnownRat a, KnownRat b) => Proxy (DivRat a b) -> RatioNat
 -- test div = ratVal div
 
-test :: forall a b . (KnownRat a, KnownRat b) => RatioNat
+test :: forall (a :: Rat) (b :: Rat) . (KnownRat a, KnownRat b) => RatioNat
 test = ratVal @(DivRat a b)
 
 
 main :: IO ()
-main = test (Proxy :: DivRat (9 % 11) (9 % 11))
+main = print $ test @(DivRat (9 % 11) (9 % 11))
