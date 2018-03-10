@@ -198,7 +198,7 @@ getEvDFunApp defs = EvDFunApp (dict $ defs)
 checkKnownRatConstraint :: RatDefs -> [KrConstraint] -> Type -> Maybe EvTerm 
 checkKnownRatConstraint defs givensStart ty = case ty of
         (TyVarTy var) -> getEvTerm (varName var) givensStart
-        _ -> error $ "strange type of DivRat parameter " ++ (showSDocUnsafe $ ppr ty) ++ ": " ++ (func' ty)
+        _ -> trace ("strange type of DivRat parameter " ++ (showSDocUnsafe $ ppr ty) ++ ": " ++ (func' ty)) Nothing
 
 getNameUniqueId :: Name -> Int
 getNameUniqueId name = getKey $ nameUnique name

@@ -6,6 +6,7 @@ author:         Alice Koroleva
 maintainer:     alicekoroleva239@gmail.com
 copyright:      2018 Alice Koroleva
 build-type:     Simple
+extra-source-files:  README.md
 cabal-version:  >= 1.10
 
 source-repository head

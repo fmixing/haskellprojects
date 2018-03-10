@@ -7,16 +7,14 @@ import Time.Rational
 import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(Proxy))
 
--- data Test :: Rat -> Constraint where
---     TestInst :: Test (DivRat (9 % 11) (9 % 11))
+testOk :: forall a b . (KnownRat a, KnownRat b) => RatioNat
+testOk = ratVal @(DivRat a b)
 
-
--- test :: (KnownRat a, KnownRat b) => Proxy (DivRat a b) -> RatioNat
--- test div = ratVal div
-
-test :: forall (a :: Rat) (b :: Rat) . (KnownRat a, KnownRat b) => RatioNat
-test = ratVal @(DivRat a b)
+-- testBad :: forall a b . (KnownRat b) => RatioNat
+-- testBad = ratVal @(DivRat a b)
 
 
 main :: IO ()
-main = print $ test @(5 / 1) @(7 / 1)
+main = do
+    print $ testOk @(5 / 1) @(7 / 1)
+    -- print $ testBad @(5 / 1) @(7 / 1)
