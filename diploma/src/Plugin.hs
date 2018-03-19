@@ -1,44 +1,49 @@
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE DataKinds             #-}
-{-# LANGUAGE TypeOperators         #-} -- для ':
-{-# LANGUAGE PolyKinds             #-} -- для "Unexpected kind variable ‘k’"
-{-# LANGUAGE UndecidableInstances  #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE ExplicitNamespaces   #-}
+{-# LANGUAGE PolyKinds            #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE TypeOperators        #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Plugin ( plugin, Set ) where
 
-import Data.Type.Equality (type (==))
-import GHC.TcPluginM.Extra (evByFiat, lookupModule, lookupName)
-import Data.Either         (partitionEithers)
-import Data.Maybe (catMaybes)
-import Outputable          (Outputable, ppr, showSDocUnsafe)
-import Debug.Trace         (trace)
-import Data.Typeable       (typeOf, typeRepFingerprint)
+import           Data.Either         (partitionEithers)
+import           Data.Maybe          (catMaybes)
+import           Data.Type.Equality  (type (==))
+import           Data.Typeable       (typeOf, typeRepFingerprint)
+import           Debug.Trace         (trace)
+import           GHC.TcPluginM.Extra (evByFiat, lookupModule, lookupName)
+import           Outputable          (Outputable, ppr, showSDocUnsafe)
 
 -- GHC API
-import Plugins    (Plugin (..), defaultPlugin)
-import TcRnTypes  (Ct, TcPlugin (..), TcPluginResult (..), ctEvPred, ctEvidence)
-import TcPluginM  (TcPluginM, tcLookupTyCon, zonkCt)
-import TyCon      (TyCon, TyCon(..), tyConName, tyConFlavour, tyConBinders, isPromotedDataCon, isDataTyCon, tyConUnique)
-import Module     (mkModuleName)
-import FastString (fsLit)
-import OccName    (mkTcOcc)
-import Type       (PredTree(..), classifyPredType, EqRel(..))
-import TyCoRep    (Type (..), KindOrType)
-import Var        (Var, isId, isTyVar, isTcTyVar, tcTyVarDetails, varName, DFunId)
-import TcType     (pprTcTyVarDetails)
-import Name       (getName)
-import TcEvidence (EvTerm (..))
+import           FastString          (fsLit)
+import           Module              (mkModuleName)
+import           Name                (getName)
+import           OccName             (mkTcOcc)
+import           Plugins             (Plugin (..), defaultPlugin)
+import           TcEvidence          (EvTerm (..))
+import           TcPluginM           (TcPluginM, tcLookupTyCon)
+import           TcRnTypes           (Ct, TcPlugin (..), TcPluginResult (..),
+                                      ctEvPred, ctEvidence)
+import           TcType              (pprTcTyVarDetails)
+import           TyCon               (TyCon (..), isPromotedDataCon,
+                                      tyConBinders, tyConFlavour, tyConName,
+                                      tyConUnique)
+import           TyCoRep             (KindOrType, Type (..))
+import           Type                (EqRel (..), PredTree (..),
+                                      classifyPredType)
+import           Var                 (isId, isTcTyVar, isTyVar, tcTyVarDetails)
 
 data TSet k
 
 type family Set (xs :: [k]) :: TSet k
 
 plugin :: Plugin
-plugin = defaultPlugin { tcPlugin = const (Just typeLevelSetsPlugin) } 
+plugin = defaultPlugin { tcPlugin = const (Just typeLevelSetsPlugin) }
 
 typeLevelSetsPlugin :: TcPlugin
-typeLevelSetsPlugin = 
-  TcPlugin { tcPluginInit  = lookupSetTyCon 
+typeLevelSetsPlugin =
+  TcPlugin { tcPluginInit  = lookupSetTyCon
            , tcPluginSolve = solveSet
            , tcPluginStop  = const (return ())
            }
@@ -48,19 +53,14 @@ lookupSetTyCon :: TcPluginM SetDefs
 lookupSetTyCon = do
     md <- lookupModule setModule setPackage
     setTyCon <- look md "Set"
-    -- consTyCon <- look md' ":"
     return $ SetDefs setTyCon
-    -- return $ SetDefs setTyCon consTyCon
   where
     setModule = mkModuleName "Plugin"
     setPackage = fsLit "diploma"
     look md s = tcLookupTyCon =<< lookupName md (mkTcOcc s)
 
 
-data SetDefs = SetDefs 
-             { set :: TyCon
-            --  , cons :: TyCon
-             }
+newtype SetDefs = SetDefs { set :: TyCon }
 
 solveSet :: SetDefs
          -> [Ct]
@@ -75,15 +75,15 @@ solveSet defs _ _ wanteds = do
         _ -> do
             let xs = fmap constraintToEvTerm setConstraints
             let (lefts, rights) = partitionEithers xs
-            if not $ null lefts 
-                then return $ (TcPluginContradiction lefts)
-                else do 
+            if not $ null lefts
+                then return $ TcPluginContradiction lefts
+                else do
                     let resolved = concatMap fst rights
                     let newWanteds = concatMap snd rights
                     if null resolved then return $ TcPluginOk [] [] else return $ TcPluginOk resolved newWanteds
 
 -- здесь KindsOrTypes == [*, '[Int, Bool, Int]] -- ' здесь из вывода (те аутпута)
-constraintToEvTerm :: SetConstraint -> Either Ct ([(EvTerm, Ct)], [Ct]) 
+constraintToEvTerm :: SetConstraint -> Either Ct ([(EvTerm, Ct)], [Ct])
 constraintToEvTerm setConstraint = do
     let (ct, ty1, ty2, _, _) = setConstraint
     case ty1 of
@@ -92,8 +92,8 @@ constraintToEvTerm setConstraint = do
                 (TyConApp _ [_, y2]) -> do
                     let types1 = sort $ extractTypes y1
                     let types2 = sort $ extractTypes y2
-                    if checkEquality types1 types2 
-                        then Right ([(evByFiat "ghc-typelits-gcd" ty1 ty2, ct)], [])
+                    if checkEquality types1 types2
+                        then Right ([(evByFiat "set-constraint" ty1 ty2, ct)], [])
                         else Left ct
                 _ -> Right ([], [ct]) -- означает, что плагин не может решить данный констрейнт (в смысле не предназначен для решения)
         _-> Right ([], [ct])
@@ -108,9 +108,9 @@ extractTypes :: Type -> [Type]
 extractTypes (TyConApp tyCon xs) =
     -- if isPromotedDataCon (trace (showSDocUnsafe $ ppr $ tyConUnique tyCon) tyCon)
     if isPromotedDataCon tyCon
-        then case xs of 
-                (_ : y : xs') -> y : (concatMap extractTypes xs')
-                _ -> []
+        then case xs of
+                (_ : y : xs') -> y : concatMap extractTypes xs'
+                _             -> []
         else []
 extractTypes _ = []
 
@@ -132,7 +132,7 @@ sort arr = let (xs', ys') = split arr in merge (sort xs') (sort ys')
         case compare xType yType of
             GT -> y : merge (x : xs) ys
             LT -> x : merge xs (y : ys)
-            EQ -> x : merge xs ys 
+            EQ -> x : merge xs ys
 
 checkEquality :: [Type] -> [Type] -> Bool
 checkEquality [] [] = True
@@ -155,13 +155,13 @@ checkEquality (x : xs) (y : ys) = do
 -- TyConApp TyCon [KindOrType]
 -- ty1 == TyConApp (Set :: TyCon) ([*, '[Int, Bool, Int]] :: [KindOrType]) для нашего случая
 getSetConstraint :: SetDefs -> Ct -> Maybe SetConstraint
-getSetConstraint defs ct = 
+getSetConstraint defs ct =
     case classifyPredType $ ctEvPred $ ctEvidence ct of
         (EqPred NomEq ty1 ty2) -- NomEq == nominal equality
-            -> case ty1 of 
-                (TyConApp tyCon1 kot1) -> case ty2 of 
+            -> case ty1 of
+                (TyConApp tyCon1 kot1) -> case ty2 of
                     (TyConApp tyCon2 kot2)
-                        | tyConName tyCon1 == (getName $ set defs) && tyConName tyCon2 == (getName $ set defs) -> Just (ct, ty1, ty2, kot1, kot2)
+                        | tyConName tyCon1 == getName (set defs) && tyConName tyCon2 == getName (set defs) -> Just (ct, ty1, ty2, kot1, kot2)
                     _ -> Nothing
                 _ -> Nothing
         _ -> Nothing
@@ -175,18 +175,18 @@ type SetConstraint = ( Ct    -- The Set constraint
 
 -- DEBUG
 -- getSetConstraint :: SetDefs -> Ct -> Maybe Ct
--- getSetConstraint defs ct = 
+-- getSetConstraint defs ct =
 --     case classifyPredType $ ctEvPred $ ctEvidence ct of
 --         (EqPred NomEq ty1 ty2) -- NomEq == nominal equality
 --             -- |  className cls == (getName $ knownRatTyCon defs)
 --             --    -> Just (ct, cls, ty)
 --             -- -> trace (showSDocUnsafe $ ppr a) Nothing
---             -> case ty1 of 
+--             -> case ty1 of
 --                 (TyConApp tyCon1 kot1) -> case ty2 of
 --                     (TyConApp tyCon2 kot2) -> trace ("TyConApp " ++ (showSDocUnsafe $ ppr tyCon1) ++ " " ++ (showSDocUnsafe $ ppr kot1) ++ " " ++ (show $ fmap (\x -> (showSDocUnsafe $ ppr x) ++ "         " ++ func' x) kot1)) Nothing
 --                     _ -> Nothing
-                    
-                    
+
+
 --                 _ -> Nothing
 --             -- -> trace (func' ty1 ++ " " ++ func' ty2) Nothing
 --         _ -> Nothing
@@ -202,7 +202,7 @@ func' CoercionTy{} = "CoercionTy "
 func' (TyConApp tyCon kot) = "TyConApp: tyConFlavour: " ++ (tyConFlavour tyCon) ++ ", sDoc: " ++ (showSDocUnsafe $ ppr tyCon) ++ ", KindsOrTypes: " ++ (showSDocUnsafe $ ppr kot) ++ ":: " ++ (show $ fmap func' kot)
 
 
--- TyConApp: для '[Int, Int] 
+-- TyConApp: для '[Int, Int]
 -- 1. tyConFlavour: promoted data constructor, sDoc: ':, KindsOrTypes: [*, Int, '[Int]]
 -- -> 2. tyConFlavour: built-in type, sDoc: TYPE, KindsOrTypes: ['LiftedRep]
 --    -> 3. tyConFlavour: promoted data constructor, sDoc: 'LiftedRep, KindsOrTypes: []
