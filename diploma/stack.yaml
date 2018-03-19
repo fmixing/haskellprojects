@@ -1,1 +1,5 @@
 resolver: lts-11.0
+
+flags:
+  ghc-prim:
+    include-ghc-prim: true

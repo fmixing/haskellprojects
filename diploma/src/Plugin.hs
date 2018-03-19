@@ -7,17 +7,18 @@
 module Plugin ( plugin, Set ) where
 
 import Data.Type.Equality (type (==))
-import GHC.TcPluginM.Extra (lookupModule, lookupName)
+import GHC.TcPluginM.Extra (evByFiat, lookupModule, lookupName)
 import Data.Either         (partitionEithers)
 import Data.Maybe (catMaybes)
 import Outputable          (Outputable, ppr, showSDocUnsafe)
 import Debug.Trace         (trace)
+import Data.Typeable       (typeOf, typeRepFingerprint)
 
 -- GHC API
 import Plugins    (Plugin (..), defaultPlugin)
 import TcRnTypes  (Ct, TcPlugin (..), TcPluginResult (..), ctEvPred, ctEvidence)
 import TcPluginM  (TcPluginM, tcLookupTyCon, zonkCt)
-import TyCon      (TyCon, TyCon(..), tyConName, tyConFlavour, tyConBinders, isPromotedDataCon, isDataTyCon)
+import TyCon      (TyCon, TyCon(..), tyConName, tyConFlavour, tyConBinders, isPromotedDataCon, isDataTyCon, tyConUnique)
 import Module     (mkModuleName)
 import FastString (fsLit)
 import OccName    (mkTcOcc)
@@ -37,8 +38,7 @@ plugin = defaultPlugin { tcPlugin = const (Just typeLevelSetsPlugin) }
 
 typeLevelSetsPlugin :: TcPlugin
 typeLevelSetsPlugin = 
-  TcPlugin { 
-             tcPluginInit  = lookupSetTyCon 
+  TcPlugin { tcPluginInit  = lookupSetTyCon 
            , tcPluginSolve = solveSet
            , tcPluginStop  = const (return ())
            }
@@ -48,7 +48,9 @@ lookupSetTyCon :: TcPluginM SetDefs
 lookupSetTyCon = do
     md <- lookupModule setModule setPackage
     setTyCon <- look md "Set"
+    -- consTyCon <- look md' ":"
     return $ SetDefs setTyCon
+    -- return $ SetDefs setTyCon consTyCon
   where
     setModule = mkModuleName "Plugin"
     setPackage = fsLit "diploma"
@@ -56,8 +58,8 @@ lookupSetTyCon = do
 
 
 data SetDefs = SetDefs 
-             {
-                 set :: TyCon
+             { set :: TyCon
+            --  , cons :: TyCon
              }
 
 solveSet :: SetDefs
@@ -66,35 +68,80 @@ solveSet :: SetDefs
          -> [Ct]
          -> TcPluginM TcPluginResult
 solveSet _ _ _ [] = return $ TcPluginOk [] []
-solveSet defs givens deriveds wanteds = do
-    gs <- mapM zonkCt givens
+solveSet defs _ _ wanteds = do
     let setConstraints = catMaybes $ fmap (getSetConstraint defs) wanteds
-    let ans = fmap (\(x,y,z) -> x) setConstraints
     case setConstraints of
-        [] -> return $ trace ("!!") $ TcPluginOk [] []
+        [] -> return $ trace "!!" $ TcPluginOk [] []
         _ -> do
-            let xs = fmap (constraintToEvTerm defs) setConstraints
+            let xs = fmap constraintToEvTerm setConstraints
             let (lefts, rights) = partitionEithers xs
-            return $ TcPluginContradiction lefts
+            if not $ null lefts 
+                then return $ (TcPluginContradiction lefts)
+                else do 
+                    let resolved = concatMap fst rights
+                    let newWanteds = concatMap snd rights
+                    if null resolved then return $ TcPluginOk [] [] else return $ TcPluginOk resolved newWanteds
 
 -- здесь KindsOrTypes == [*, '[Int, Bool, Int]] -- ' здесь из вывода (те аутпута)
-constraintToEvTerm :: SetDefs -> SetConstraint -> Either Ct ([(EvTerm, Ct)], [Ct]) 
-constraintToEvTerm defs setConstraint = do
-    let (ct, ty1, ty2) = setConstraint
+constraintToEvTerm :: SetConstraint -> Either Ct ([(EvTerm, Ct)], [Ct]) 
+constraintToEvTerm setConstraint = do
+    let (ct, ty1, ty2, _, _) = setConstraint
     case ty1 of
-        (TyConApp tyCon1 [x1, y1]) -> 
+        (TyConApp _ [_, y1]) ->  -- первый _ это TyCon для типа, второй _ это *
             case ty2 of
-                (TyConApp tyCon2 [x2, y2]) -> trace (show $ fmap func' $ extractTypes y2) Left ct
-    Left ct
+                (TyConApp _ [_, y2]) -> do
+                    let types1 = sort $ extractTypes y1
+                    let types2 = sort $ extractTypes y2
+                    if checkEquality types1 types2 
+                        then Right ([(evByFiat "ghc-typelits-gcd" ty1 ty2, ct)], [])
+                        else Left ct
+                _ -> Right ([], [ct]) -- означает, что плагин не может решить данный констрейнт (в смысле не предназначен для решения)
+        _-> Right ([], [ct])
 
+                    -- trace ((showSDocUnsafe $ ppr types1) ++ " " ++ (showSDocUnsafe $ ppr types2) ++ " " ++ (show $ fmap func' $ extractTypes y2)) Left ct
+    -- Left ct
+
+-- Здесь считаем (из аутпута трейсинга), что PromotedDataCon нам нужен тот, у которого вид KindsOrTypes
+-- [*, Int, '[Int]] (так как пока что я не умею искать ': конструктор, если смотреть на Unique этого конструктора, то он 66,
+-- для : конструктора должен быть таким же, можно сравнивать с ним)
 extractTypes :: Type -> [Type]
 extractTypes (TyConApp tyCon xs) =
-    if isPromotedDataCon tyCon 
+    -- if isPromotedDataCon (trace (showSDocUnsafe $ ppr $ tyConUnique tyCon) tyCon)
+    if isPromotedDataCon tyCon
         then case xs of 
                 (_ : y : xs') -> y : (concatMap extractTypes xs')
                 _ -> []
         else []
 extractTypes _ = []
+
+split :: [a] -> ([a], [a])
+split [] = ([], [])
+split [x] = ([x], [])
+split (x:y:xys) = (x:xs, y:ys) where (xs, ys) = split xys
+
+sort :: [Type] -> [Type]
+sort [x] = [x]
+sort [] = []
+sort arr = let (xs', ys') = split arr in merge (sort xs') (sort ys')
+  where
+    merge xs [] = xs
+    merge [] ys = ys
+    merge (x:xs) (y:ys) = do
+        let xType = typeRepFingerprint $ typeOf x
+        let yType = typeRepFingerprint $ typeOf y
+        case compare xType yType of
+            GT -> y : merge (x : xs) ys
+            LT -> x : merge xs (y : ys)
+            EQ -> x : merge xs ys 
+
+checkEquality :: [Type] -> [Type] -> Bool
+checkEquality [] [] = True
+checkEquality _ [] = False
+checkEquality [] _ = False
+checkEquality (x : xs) (y : ys) = do
+    let xType = typeRepFingerprint $ typeOf x
+    let yType = typeRepFingerprint $ typeOf y
+    (xType == yType) && checkEquality xs ys
 
 
 -- data PredTree = ClassPred Class [Type]
@@ -114,14 +161,16 @@ getSetConstraint defs ct =
             -> case ty1 of 
                 (TyConApp tyCon1 kot1) -> case ty2 of 
                     (TyConApp tyCon2 kot2)
-                        | tyConName tyCon1 == (getName $ set defs) && tyConName tyCon2 == (getName $ set defs) -> Just (ct, ty1, ty2)
+                        | tyConName tyCon1 == (getName $ set defs) && tyConName tyCon2 == (getName $ set defs) -> Just (ct, ty1, ty2, kot1, kot2)
                     _ -> Nothing
                 _ -> Nothing
         _ -> Nothing
 
-type SetConstraint = ( Ct    -- The constraint
+type SetConstraint = ( Ct    -- The Set constraint
                      , Type  -- Fst argument to equality constraint
                      , Type  -- Snd argument to equality constraint
+                     , [KindOrType] -- типы для первого Set
+                     , [KindOrType] -- типы для второго Set
                      )
 
 -- DEBUG
@@ -151,7 +200,6 @@ func' LitTy{} = "LitTy "
 func' CastTy{} = "CastTy "
 func' CoercionTy{} = "CoercionTy "
 func' (TyConApp tyCon kot) = "TyConApp: tyConFlavour: " ++ (tyConFlavour tyCon) ++ ", sDoc: " ++ (showSDocUnsafe $ ppr tyCon) ++ ", KindsOrTypes: " ++ (showSDocUnsafe $ ppr kot) ++ ":: " ++ (show $ fmap func' kot)
--- func' (TyConApp tyCon kot) = "TyConApp "
 
 
 -- TyConApp: для '[Int, Int] 

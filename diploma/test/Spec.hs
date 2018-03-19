@@ -11,13 +11,13 @@ data Dict c where
     Dict :: c => Dict c
   
 
--- test :: Proxy (Set '[Int, Bool, Int]) -> Proxy (Set '[Int, Bool])
--- test = id
-
-test :: Proxy (Set '[Int]) -> Proxy (Set '[Int, Int])
+test :: Proxy (Set '[Int, Bool, Int]) -> Proxy (Set '[Int, Bool])
 test = id
 
--- proof1 :: Dict (Set '[Int, Bool, Bool] ~ Set '[Bool, Int]); proof1 = Dict
+test1 :: Proxy (Set '[Int]) -> Proxy (Set '[Int, Int])
+test1 = id
+
+proof1 :: Dict (Set '[Int, Bool, Bool] ~ Set '[Bool, Int]); proof1 = Dict
 
 main :: IO ()
 main = putStrLn "Test suite not yet implemented"
