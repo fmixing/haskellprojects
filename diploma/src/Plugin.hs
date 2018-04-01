@@ -4,16 +4,20 @@
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds      #-}
+{-# LANGUAGE ExplicitForAll       #-}
 
 module Plugin ( plugin, Set ) where
 
 import           Data.Either         (partitionEithers)
 import           Data.Maybe          (catMaybes)
 import           Data.Type.Equality  (type (==))
-import           Data.Typeable       (typeOf, typeRepFingerprint)
+import           Data.Typeable       (Proxy(..), Proxy, TypeRep, Typeable(..), typeRep, typeOf, typeRepFingerprint)
 import           Debug.Trace         (trace)
 import           GHC.TcPluginM.Extra (evByFiat, lookupModule, lookupName)
 import           Outputable          (Outputable, ppr, showSDocUnsafe)
+import           Data.Data           (Data(..), dataTypeOf)
+
 
 -- GHC API
 import           FastString          (fsLit)
@@ -31,8 +35,10 @@ import           TyCon               (TyCon (..), isPromotedDataCon,
                                       tyConUnique)
 import           TyCoRep             (KindOrType, Type (..))
 import           Type                (EqRel (..), PredTree (..),
-                                      classifyPredType)
+                                      classifyPredType, isTyVarTy, nonDetCmpType)
 import           Var                 (isId, isTcTyVar, isTyVar, tcTyVarDetails)
+import           Unique              (getKey)
+
 
 data TSet k
 
@@ -71,7 +77,7 @@ solveSet _ _ _ [] = return $ TcPluginOk [] []
 solveSet defs _ _ wanteds = do
     let setConstraints = catMaybes $ fmap (getSetConstraint defs) wanteds
     case setConstraints of
-        [] -> return $ trace "!!" $ TcPluginOk [] []
+        [] -> return $ TcPluginOk [] []
         _ -> do
             let xs = fmap constraintToEvTerm setConstraints
             let (lefts, rights) = partitionEithers xs
@@ -90,23 +96,20 @@ constraintToEvTerm setConstraint = do
         (TyConApp _ [_, y1]) ->  -- первый _ это TyCon для типа, второй _ это *
             case ty2 of
                 (TyConApp _ [_, y2]) -> do
-                    let types1 = sort $ extractTypes y1
-                    let types2 = sort $ extractTypes y2
+                    let types1 = trace ("extracted1 " ++ (showSDocUnsafe $ ppr $ extractTypes y1) ++ " sorted1 " ++ (showSDocUnsafe $ ppr $ sort $ extractTypes y1)) sort $ extractTypes y1
+                    let types2 = trace ("extracted2 " ++ (showSDocUnsafe $ ppr $ extractTypes y2) ++ " sorted2 " ++ (showSDocUnsafe $ ppr $ sort $ extractTypes y2)) sort $ extractTypes y2
                     if checkEquality types1 types2
-                        then Right ([(evByFiat "set-constraint" ty1 ty2, ct)], [])
-                        else Left ct
+                        then trace ("typechecked: " ++ (showSDocUnsafe $ ppr $ ty1) ++ " ~ " ++ (showSDocUnsafe $ ppr $ ty2)) Right ([(evByFiat "set-constraint" ty1 ty2, ct)], [])
+                        else trace ("not typechecked: " ++ (showSDocUnsafe $ ppr $ ty1) ++ " /~ " ++ (showSDocUnsafe $ ppr $ ty2)) Left ct
                 _ -> Right ([], [ct]) -- означает, что плагин не может решить данный констрейнт (в смысле не предназначен для решения)
         _-> Right ([], [ct])
-
-                    -- trace ((showSDocUnsafe $ ppr types1) ++ " " ++ (showSDocUnsafe $ ppr types2) ++ " " ++ (show $ fmap func' $ extractTypes y2)) Left ct
-    -- Left ct
 
 -- Здесь считаем (из аутпута трейсинга), что PromotedDataCon нам нужен тот, у которого вид KindsOrTypes
 -- [*, Int, '[Int]] (так как пока что я не умею искать ': конструктор, если смотреть на Unique этого конструктора, то он 66,
 -- для : конструктора должен быть таким же, можно сравнивать с ним)
 extractTypes :: Type -> [Type]
 extractTypes (TyConApp tyCon xs) =
-    -- if isPromotedDataCon (trace (showSDocUnsafe $ ppr $ tyConUnique tyCon) tyCon)
+    -- if isPromotedDataCon (trace (show $ getKey $ tyConUnique tyCon) tyCon)
     if isPromotedDataCon tyCon
         then case xs of
                 (_ : y : xs') -> y : concatMap extractTypes xs'
@@ -126,22 +129,18 @@ sort arr = let (xs', ys') = split arr in merge (sort xs') (sort ys')
   where
     merge xs [] = xs
     merge [] ys = ys
-    merge (x:xs) (y:ys) = do
-        let xType = typeRepFingerprint $ typeOf x
-        let yType = typeRepFingerprint $ typeOf y
-        case compare xType yType of
+    merge (x:xs) (y:ys) = 
+        case nonDetCmpType x y of
             GT -> y : merge (x : xs) ys
             LT -> x : merge xs (y : ys)
             EQ -> x : merge xs ys
+
 
 checkEquality :: [Type] -> [Type] -> Bool
 checkEquality [] [] = True
 checkEquality _ [] = False
 checkEquality [] _ = False
-checkEquality (x : xs) (y : ys) = do
-    let xType = typeRepFingerprint $ typeOf x
-    let yType = typeRepFingerprint $ typeOf y
-    (xType == yType) && checkEquality xs ys
+checkEquality (x : xs) (y : ys) = nonDetCmpType x y == EQ && checkEquality xs ys
 
 
 -- data PredTree = ClassPred Class [Type]
