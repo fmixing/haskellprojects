@@ -9,12 +9,12 @@
 
 module Plugin ( plugin, Set ) where
 
-import           Data.Either         (partitionEithers)
+import           Data.Either         (rights)
 import           Data.Maybe          (catMaybes)
 import           Data.Type.Equality  (type (==))
 import           Data.Typeable       (Proxy(..), Proxy, TypeRep, Typeable(..), typeRep, typeOf, typeRepFingerprint)
 import           Debug.Trace         (trace)
-import           GHC.TcPluginM.Extra (evByFiat, lookupModule, lookupName)
+import           GHC.TcPluginM.Extra (evByFiat, lookupModule, lookupName, tracePlugin)
 import           Outputable          (Outputable, ppr, showSDocUnsafe)
 import           Data.Data           (Data(..), dataTypeOf)
 
@@ -26,18 +26,20 @@ import           Name                (getName)
 import           OccName             (mkTcOcc)
 import           Plugins             (Plugin (..), defaultPlugin)
 import           TcEvidence          (EvTerm (..))
-import           TcPluginM           (TcPluginM, tcLookupTyCon)
+import           TcPluginM           (TcPluginM, tcLookupTyCon, zonkCt, tcPluginTrace)
 import           TcRnTypes           (Ct, TcPlugin (..), TcPluginResult (..),
                                       ctEvPred, ctEvidence)
 import           TcType              (pprTcTyVarDetails)
 import           TyCon               (TyCon (..), isPromotedDataCon,
                                       tyConBinders, tyConFlavour, tyConName,
-                                      tyConUnique)
+                                      tyConUnique, isFamilyTyCon)
 import           TyCoRep             (KindOrType, Type (..))
 import           Type                (EqRel (..), PredTree (..),
                                       classifyPredType, isTyVarTy, nonDetCmpType)
 import           Var                 (isId, isTcTyVar, isTyVar, tcTyVarDetails)
-import           Unique              (getKey)
+import           Unique              (getKey, getUnique)
+import           TysWiredIn          (listTyCon, consDataCon)
+import           TcHsType            (tcInferArgs)
 
 
 data TSet k
@@ -80,13 +82,12 @@ solveSet defs _ _ wanteds = do
         [] -> return $ TcPluginOk [] []
         _ -> do
             let xs = fmap constraintToEvTerm setConstraints
-            let (lefts, rights) = partitionEithers xs
-            if not $ null lefts
-                then return $ TcPluginContradiction lefts
-                else do
-                    let resolved = concatMap fst rights
-                    let newWanteds = concatMap snd rights
-                    if null resolved then return $ TcPluginOk [] [] else return $ TcPluginOk resolved newWanteds
+            -- lefts содержит список констрейнтов, которые разрешить невозможно, так как они неверные
+            let checked = rights xs
+            let resolved = concatMap fst checked
+            let newWanteds = concatMap snd checked
+            if null resolved then return $ TcPluginOk [] [] else return $ TcPluginOk resolved newWanteds
+                    
 
 -- здесь KindsOrTypes == [*, '[Int, Bool, Int]] -- ' здесь из вывода (те аутпута)
 constraintToEvTerm :: SetConstraint -> Either Ct ([(EvTerm, Ct)], [Ct])
@@ -105,16 +106,21 @@ constraintToEvTerm setConstraint = do
         _-> Right ([], [ct])
 
 -- Здесь считаем (из аутпута трейсинга), что PromotedDataCon нам нужен тот, у которого вид KindsOrTypes
--- [*, Int, '[Int]] (так как пока что я не умею искать ': конструктор, если смотреть на Unique этого конструктора, то он 66,
--- для : конструктора должен быть таким же, можно сравнивать с ним)
+-- [*, Int, '[Int]]
+-- Научилась искать ': дата конструктор. Теперь кажется логичным, что ': :: a -> [a] -> *.
 extractTypes :: Type -> [Type]
 extractTypes (TyConApp tyCon xs) =
-    -- if isPromotedDataCon (trace (show $ getKey $ tyConUnique tyCon) tyCon)
-    if isPromotedDataCon tyCon
+    -- if isPromotedDataCon (trace ((show $ getKey $ getUnique consDataCon) ++ " " ++ (show $ getKey $ tyConUnique tyCon)) tyCon)
+    -- сравниваем Unique числа: для promotedDataCon и просто dataCon они будут совпадать
+    if (getKey $ getUnique consDataCon) == (getKey $ tyConUnique tyCon)
         then case xs of
                 (_ : y : xs') -> y : concatMap extractTypes xs'
                 _             -> []
-        else []
+        -- else if isFamilyTyCon tyCon
+        --     then do
+        --         let tcb = tyConBinders tyCon
+
+            else []
 extractTypes _ = []
 
 split :: [a] -> ([a], [a])
@@ -173,7 +179,7 @@ type SetConstraint = ( Ct    -- The Set constraint
                      )
 
 -- DEBUG
--- getSetConstraint :: SetDefs -> Ct -> Maybe Ct
+-- getSetConstraint :: SetDefs -> Ct -> Maybe SetConstraint
 -- getSetConstraint defs ct =
 --     case classifyPredType $ ctEvPred $ ctEvidence ct of
 --         (EqPred NomEq ty1 ty2) -- NomEq == nominal equality
@@ -184,8 +190,6 @@ type SetConstraint = ( Ct    -- The Set constraint
 --                 (TyConApp tyCon1 kot1) -> case ty2 of
 --                     (TyConApp tyCon2 kot2) -> trace ("TyConApp " ++ (showSDocUnsafe $ ppr tyCon1) ++ " " ++ (showSDocUnsafe $ ppr kot1) ++ " " ++ (show $ fmap (\x -> (showSDocUnsafe $ ppr x) ++ "         " ++ func' x) kot1)) Nothing
 --                     _ -> Nothing
-
-
 --                 _ -> Nothing
 --             -- -> trace (func' ty1 ++ " " ++ func' ty2) Nothing
 --         _ -> Nothing
