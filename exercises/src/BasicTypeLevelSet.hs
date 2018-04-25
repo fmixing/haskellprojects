@@ -9,6 +9,10 @@ module BasicTypeLevelSet where
 import Lib (If)
 import Data.Type.Equality
 
+type family Set (xs :: [k]) :: [k] where 
+    Set '[] = '[]
+    Set (x ': xs) =  Insert' x (Set xs)
+
 type family Insert (x :: k) (xs :: [k]) :: [k] where 
     Insert x xs = x ': xs
 
